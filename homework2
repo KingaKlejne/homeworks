@@ -1,0 +1,67 @@
+--1. Sprawdź jak wyglądają zapasy magazynowe poszczególnych kategorii produktów (tabele products, categories) - 
+--suma unitinstock
+
+select 
+from products p 
+join categories c on c."CategoryID" = p."CategoryID" 
+
+--2. Do wyników tabeli orders dodaj numer zamówienia w miesiącu (partycjonowanie po miesiącach) kolejność według daty.
+--• Dodaj analogiczne pole, ale w kolejności malejącej.
+
+create view v_zamowienia as
+select  *
+, 		row_number () 	over (partition by to_char(o."OrderDate" ,'YYY-MM') order by o."OrderDate") as rn
+, 		row_number () 	over (partition by to_char(o."OrderDate" ,'YYY-MM') order by o."OrderDate" desc) as rn_malejaco
+from orders o 
+;
+
+--• Wypisz datę pierwszego i ostatniego zamówienia w poszczególnych miesiącach.
+
+select  v."CustomerID"
+,		v."OrderDate" 
+from v_zamowienia v
+where rn = 1 or rn_malejaco = 1;
+
+--• Dodaj do wyników kwotę zamówienia.
+create view v_kwota3 as
+select 	v."CustomerID"
+,		v."OrderDate" 
+,		round(sum(od."Quantity" * od."UnitPrice"*(1-od."Discount") )::numeric,2) as wartosc_zamowien
+from v_zamowienia v
+join order_details od on v."OrderID" = od."OrderID" 
+where rn = 1 or rn_malejaco = 1
+group by v."OrderDate", v."CustomerID"
+;
+
+--• Podziel zbiór za pomocą funkcji ntile na 5 podzbiorów według kwoty zamówienia.
+
+select  v3."CustomerID"
+,		v3."OrderDate" 
+,		v3."wartosc_zamowien"
+,		ntile(5) over (order by "wartosc_zamowien") 
+from v_kwota3 v3;
+
+
+--• Wyznacz minimalną i maksymalną wartość z wyników poprzedniego punktu dla każdego
+--klienta. (wyniki funkcji ntile)
+create view v_ntilezam2 as
+select  v2."CustomerID"
+,		v2."OrderDate" 
+,		v2."wartosc_zamowien"
+,		ntile(5) over (order by "wartosc_zamowien") as ntile_zamowienia
+from v_kwota3 v2;
+
+select  v3."CustomerID"
+,		v3."OrderDate" 
+,		v3."wartosc_zamowien"
+,		min(ntile_zamowienia)
+,		max(ntile_zamowienia)
+from v_ntilezam2 v3
+group by v3."CustomerID", v3."OrderDate", v3."wartosc_zamowien";
+
+
+--• Sprawdź, czy istnieją klienci premium (którzy zawsze występują w kwnatylu 4 lub 5).
+
+select v3."CustomerID"
+from v_ntilezam2 v3
+where ntile_zamowienia in (4,5);
